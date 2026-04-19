@@ -11,6 +11,8 @@ using glm::vec3;
 using glm::vec4;
 using glm::ivec2;
 
+using torch::Tensor;
+
 __device__ void atomicAdd(vec4* ptr, vec4 val) {
     atomicAdd(&(ptr->x), val.x);
     atomicAdd(&(ptr->y), val.y);
@@ -122,3 +124,73 @@ __global__ void backward_kernel(
     GS_weight_grad[idx_GS] = weight_grad;
 }
 
+void forward(
+    const Tensor param,
+    const Tensor center,
+    const Tensor weight,
+    const Tensor bound,
+    const float origin_x,
+    const float origin_y,
+    const float resolution,
+    Tensor pixel
+){
+    const int num = param.size(0);
+    const int thread_per_block = 256;
+    const int num_blocks = (num + thread_per_block - 1) / thread_per_block;
+    const ivec2 size = ivec2(pixel.size(0), pixel.size(1));
+    const vec2 origin = vec2(origin_x, origin_y);
+    forward_kernel<<<num_blocks, thread_per_block>>>(
+        num,
+        reinterpret_cast<const vec3 *>(param.const_data_ptr<float>()),
+        reinterpret_cast<const vec2 *>(center.const_data_ptr<float>()),
+        reinterpret_cast<const vec4 *>(weight.const_data_ptr<float>()),
+        reinterpret_cast<const vec2 *>(bound.const_data_ptr<float>()),
+        size,
+        origin,
+        resolution,
+        reinterpret_cast<vec4 *>(pixel.mutable_data_ptr<float>())
+    );
+}
+
+void backward(
+    const Tensor param,
+    const Tensor center,
+    const Tensor weight,
+    const Tensor bound,
+
+    const float origin_x,
+    const float origin_y,
+    const float resolution,
+    const Tensor pixel,
+
+    Tensor param_grad,
+    Tensor center_grad,
+    Tensor weight_grad
+){
+    const int num = param.size(0);
+    const int thread_per_block = 256;
+    const int num_blocks = (num + thread_per_block - 1) / thread_per_block;
+    const ivec2 size = ivec2(pixel.size(0), pixel.size(1));
+    const vec2 origin = vec2(origin_x, origin_y);
+    backward_kernel<<<num_blocks, thread_per_block>>>(
+        num,
+        reinterpret_cast<const vec3 *>(param.const_data_ptr<float>()),
+        reinterpret_cast<const vec2 *>(center.const_data_ptr<float>()),
+        reinterpret_cast<const vec4 *>(weight.const_data_ptr<float>()),
+        reinterpret_cast<const vec2 *>(bound.const_data_ptr<float>()),
+
+        size,
+        origin,
+        resolution,
+        reinterpret_cast<const vec4 *>(pixel.const_data_ptr<float>()),
+
+        reinterpret_cast<vec3 *>(param_grad.mutable_data_ptr<float>()),
+        reinterpret_cast<vec2 *>(center_grad.mutable_data_ptr<float>()),
+        reinterpret_cast<vec4 *>(weight_grad.mutable_data_ptr<float>())
+    );
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
+    m.def("forward", &forward);
+    m.def("backward", &backward);
+}
