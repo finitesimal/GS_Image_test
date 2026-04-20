@@ -65,7 +65,7 @@ def rasterize(sigma, mu, weight, size, origin_resolution):
 
     return CudaWrapper.apply(num, param, mu, weight, bound, size, origin_resolution)
 
-def rasterize_blend(sigma, mu, color, weight, size, origin_resolution):
+def rasterize_blend(sigma, mu, color, weight, size, origin_resolution, min_weight=0.01):
     check_input(sigma)
     check_input(mu)
     check_input(color)
@@ -79,4 +79,4 @@ def rasterize_blend(sigma, mu, color, weight, size, origin_resolution):
     weight = weight.unsqueeze(1)
     weight = torch.cat([color * weight, weight], dim=1)
     result = rasterize(sigma, mu, weight, size, origin_resolution)
-    return result[:, 0 : 3] / result[:, 3].unsqueeze(1)
+    return result[:, :, 0 : 3] / torch.clamp(result[:, :, 3].unsqueeze(2), min=min_weight)
