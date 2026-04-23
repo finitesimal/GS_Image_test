@@ -23,7 +23,7 @@ def check_input(t):
     assert t.is_cuda
     assert t.is_contiguous()
 
-class CudaWrapper(torch.autograd.Function):
+class _C_wrapper(torch.autograd.Function):
     @staticmethod
     def forward(ctx, num, param, center, weight, bound, size, origin_resolution):
         size_x, size_y = size
@@ -48,24 +48,7 @@ class CudaWrapper(torch.autograd.Function):
         _C.backward(param, center, weight, bound, origin_x, origin_y, resolution, loss, param_grad, center_grad, weight_grad)
         return None, param_grad, center_grad, weight_grad, None, None, None
 
-def rasterize(sigma, mu, weight, size, origin_resolution):
-    check_input(sigma)
-    check_input(mu)
-    check_input(weight)
-    num = sigma.size(0)
-    assert sigma.shape == (num, 3)
-    assert mu.shape == (num, 2)
-    assert weight.shape == (num, 4)
-
-    a = sigma[:, 0].unsqueeze(1)
-    b = sigma[:, 1].unsqueeze(1)
-    c = sigma[:, 2].unsqueeze(1)
-    param = torch.cat([c, -b, a], dim=1) / (a * c - b * b)
-    bound = 3.0 * torch.cat([a, c], dim=1).sqrt()
-
-    return CudaWrapper.apply(num, param, mu, weight, bound, size, origin_resolution)
-
-def rasterize_blend(sigma, mu, color, weight, size, origin_resolution, min_weight=0.01):
+def rasterize(sigma, mu, color, weight, size, origin_resolution, min_weight=0.01):
     check_input(sigma)
     check_input(mu)
     check_input(color)
@@ -78,5 +61,11 @@ def rasterize_blend(sigma, mu, color, weight, size, origin_resolution, min_weigh
 
     weight = weight.unsqueeze(1)
     weight = torch.cat([color * weight, weight], dim=1)
-    result = rasterize(sigma, mu, weight, size, origin_resolution)
+    a = sigma[:, 0].unsqueeze(1)
+    b = sigma[:, 1].unsqueeze(1)
+    c = sigma[:, 2].unsqueeze(1)
+    param = torch.cat([c, -b, a], dim=1) / (a * c - b * b)
+    bound = 3.0 * torch.cat([a, c], dim=1).sqrt()
+
+    result = _C_wrapper.apply(num, param, mu, weight, bound, size, origin_resolution)
     return result[:, :, 0 : 3] / torch.clamp(result[:, :, 3].unsqueeze(2), min=min_weight)
